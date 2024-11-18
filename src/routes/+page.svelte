@@ -3,46 +3,32 @@
 	import * as THREE from 'three';
 	import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
 
-	let scene,
-		camera,
-		renderer,
-		yeti,
-		keys,
-		gridHelper,
-		mixer,
-		walkAction,
-		idleAction,
-		jumpAction,
-		idleJumpAction;
+	let scene, camera, renderer, yeti, keys, gridHelper, mixer;
+	let walkAction, idleAction, jumpIdleAction, jumpLandAction;
 
 	const moveSpeed = 0.05;
-	const jumpHeight = 1; // Maximum jump height
-	const jumpSpeed = 0.1; // Speed of jump
-	let isJumping = false; // Flag to track jumping state
+	const jumpHeight = 2; // Maximum height of the jump
+	const jumpSpeed = 0.1; // Speed of jump progression
+	let isJumping = false; // Is the Yeti in the air?
 	let jumpProgress = 0; // Progress of the jump (0 to 1)
-	let zoomDistance = 10; // Initial camera distance
-	const minZoom = 5; // Minimum zoom distance
-	const maxZoom = 30; // Maximum zoom distance
+	let zoomDistance = 10; // Camera zoom distance
+	const minZoom = 5; // Min zoom distance
+	const maxZoom = 30; // Max zoom distance
 
 	function init() {
-		// Create the scene
 		scene = new THREE.Scene();
 
-		// Set up the camera
 		camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 		camera.position.set(0, 5, zoomDistance);
 
-		// Renderer setup
 		renderer = new THREE.WebGLRenderer({ antialias: true });
 		renderer.setSize(window.innerWidth, window.innerHeight);
 		document.body.appendChild(renderer.domElement);
 
-		// Add a grid that visually extends far into the distance
 		gridHelper = new THREE.GridHelper(1000, 100, 0x888888, 0x444444);
 		gridHelper.position.y = 0;
 		scene.add(gridHelper);
 
-		// Load the Yeti model
 		const loader = new GLTFLoader();
 		loader.load(
 			'/Yeti.gltf',
@@ -50,47 +36,39 @@
 				yeti = gltf.scene;
 				yeti.scale.set(0.5, 0.5, 0.5);
 				yeti.position.set(0, 0, 0);
-				yeti.rotation.y = Math.PI;
 				scene.add(yeti);
 
-				// Set up the animation mixer and actions
 				mixer = new THREE.AnimationMixer(yeti);
 
-				// Locate animations
-				const walkAnimation = gltf.animations.find((anim) => anim.name.toLowerCase() === 'walk');
-				const idleAnimation = gltf.animations.find((anim) => anim.name.toLowerCase() === 'idle');
-				const idleJumpAnimation = gltf.animations.find(
-					(anim) => anim.name.toLowerCase() === 'idle_jump'
+				const animations = gltf.animations;
+				console.log(
+					'Available animations:',
+					animations.map((anim) => anim.name)
 				);
-				const jumpAnimation = gltf.animations.find((anim) => anim.name.toLowerCase() === 'jump');
 
-				// Assign actions
-				if (walkAnimation) walkAction = mixer.clipAction(walkAnimation);
-				if (idleAnimation) {
-					idleAction = mixer.clipAction(idleAnimation);
-					idleAction.play(); // Default idle animation
-				}
-				if (idleJumpAnimation) idleJumpAction = mixer.clipAction(idleJumpAnimation);
-				if (jumpAnimation) jumpAction = mixer.clipAction(jumpAnimation);
+				// Assign animations
+				idleAction = mixer.clipAction(animations.find((a) => a.name === 'Idle'));
+				walkAction = mixer.clipAction(animations.find((a) => a.name === 'Walk'));
+				jumpIdleAction = mixer.clipAction(animations.find((a) => a.name === 'Jump_Idle'));
+				jumpLandAction = mixer.clipAction(animations.find((a) => a.name === 'Jump_Land'));
+
+				idleAction?.play();
 			},
 			undefined,
 			(error) => {
-				console.error('Error loading Yeti model:', error);
+				console.error('Error loading GLTF:', error);
 			}
 		);
 
-		// Lighting
 		const light = new THREE.DirectionalLight(0xffffff, 1);
 		light.position.set(5, 5, 5);
 		scene.add(light);
 
-		// Event listeners
 		window.addEventListener('resize', onWindowResize);
 		window.addEventListener('wheel', onScrollZoom);
 		window.addEventListener('keydown', onKeyDown);
 		window.addEventListener('keyup', onKeyUp);
 
-		// Initialize keyboard input tracking
 		keys = {};
 	}
 
@@ -101,20 +79,15 @@
 	}
 
 	function onScrollZoom(event) {
-		// Adjust zoom distance based on scroll
 		zoomDistance = Math.min(maxZoom, Math.max(minZoom, zoomDistance + event.deltaY * 0.1));
 	}
 
 	function onKeyDown(event) {
 		keys[event.key] = true;
 
-		// Handle jump on spacebar
-		if (event.key === ' ' && !isJumping && idleJumpAction && jumpAction) {
-			isJumping = true;
-			jumpProgress = 0;
-			idleAction?.stop();
-			walkAction?.stop();
-			idleJumpAction.reset().play();
+		if (event.key === ' ') {
+			event.preventDefault();
+			if (!isJumping) startJump();
 		}
 	}
 
@@ -122,55 +95,54 @@
 		keys[event.key] = false;
 	}
 
+	function startJump() {
+		if (!jumpIdleAction || !jumpLandAction) return;
+
+		isJumping = true;
+		jumpProgress = 0;
+
+		// Stop other animations
+		idleAction?.stop();
+		walkAction?.stop();
+
+		// Play Jump_Idle animation
+		jumpIdleAction.reset().play();
+		console.log('Jump started');
+	}
+
 	function handleYetiMovement() {
 		if (isJumping) {
-			// Simulate jump with a sine wave for smooth motion
+			// Update jump progress
 			jumpProgress += jumpSpeed;
+
+			// Calculate jump height using a sine wave
 			const jumpValue = Math.sin(jumpProgress * Math.PI) * jumpHeight;
 			yeti.position.y = jumpValue;
 
-			// Transition to the Jump animation at the peak of the jump
-			if (jumpProgress >= 0.5 && idleJumpAction.isRunning()) {
-				idleJumpAction.stop();
-				jumpAction.reset().play();
+			// Transition to Jump_Land at the descent
+			if (jumpProgress >= 0.5 && jumpIdleAction.isRunning()) {
+				jumpIdleAction.stop();
+				jumpLandAction.reset().play();
 			}
 
 			// End the jump
 			if (jumpProgress >= 1) {
 				isJumping = false;
 				yeti.position.y = 0; // Reset to ground level
-				jumpAction.stop();
-				idleAction?.play(); // Return to idle
+				jumpLandAction.stop();
+				idleAction?.play();
+				console.log('Jump ended');
 			}
-			return; // Skip other movement while jumping
+
+			return; // Skip walking logic while jumping
 		}
 
+		// Walking logic remains unchanged
 		let isMoving = false;
 		let direction = null;
 
-		// Movement logic
 		if (yeti) {
-			if (keys['w'] && keys['a']) {
-				yeti.position.z -= moveSpeed * Math.SQRT1_2;
-				yeti.position.x -= moveSpeed * Math.SQRT1_2;
-				direction = Math.PI + Math.PI / 4;
-				isMoving = true;
-			} else if (keys['w'] && keys['d']) {
-				yeti.position.z -= moveSpeed * Math.SQRT1_2;
-				yeti.position.x += moveSpeed * Math.SQRT1_2;
-				direction = Math.PI - Math.PI / 4;
-				isMoving = true;
-			} else if (keys['s'] && keys['a']) {
-				yeti.position.z += moveSpeed * Math.SQRT1_2;
-				yeti.position.x -= moveSpeed * Math.SQRT1_2;
-				direction = -Math.PI / 4;
-				isMoving = true;
-			} else if (keys['s'] && keys['d']) {
-				yeti.position.z += moveSpeed * Math.SQRT1_2;
-				yeti.position.x += moveSpeed * Math.SQRT1_2;
-				direction = Math.PI / 4;
-				isMoving = true;
-			} else if (keys['w']) {
+			if (keys['w']) {
 				yeti.position.z -= moveSpeed;
 				direction = Math.PI;
 				isMoving = true;
@@ -188,12 +160,9 @@
 				isMoving = true;
 			}
 
-			// Rotate the Yeti
-			if (direction !== null) {
-				yeti.rotation.y = direction;
-			}
+			if (direction !== null) yeti.rotation.y = direction;
 
-			// Handle animations
+			// Animation transitions
 			if (walkAction && idleAction) {
 				if (isMoving) {
 					if (!walkAction.isRunning()) {
